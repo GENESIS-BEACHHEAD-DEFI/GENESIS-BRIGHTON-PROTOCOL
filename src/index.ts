@@ -218,6 +218,40 @@ app.get("/intelligence", (_req, res) => {
   });
 });
 
+// ── Forward DOCTRINE patterns to Whiteboard ──
+const WHITEBOARD_URL = process.env.WHITEBOARD_URL || "";
+const forwardedToWhiteboard = new Set<string>();
+
+function forwardDoctrineToWhiteboard(): void {
+  if (!WHITEBOARD_URL) return;
+
+  const doctrine = detector.getPatterns({ minConfidence: "DOCTRINE", activeOnly: true });
+
+  for (const pattern of doctrine) {
+    if (forwardedToWhiteboard.has(pattern.id)) continue;
+
+    fetch(`${WHITEBOARD_URL}/intel/ingest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        category: "PATTERN",
+        source: "BRIGHTON",
+        intelligence: `${pattern.type}: ${pattern.description} (${pattern.evidence.occurrences} occurrences, ${(pattern.evidence.successRate * 100).toFixed(0)}% success, avg spread ${pattern.evidence.avgSpreadBps}bps)`,
+        affectedRails: ["ALL"],
+        affectedClasses: [],
+        evidence: [pattern.id],
+        tags: [pattern.type, pattern.confidence, ...(pattern.trigger.exchangePair ? [pattern.trigger.exchangePair] : [])],
+      }),
+      signal: AbortSignal.timeout(5000),
+    }).then(() => {
+      forwardedToWhiteboard.add(pattern.id);
+    }).catch(() => {});
+  }
+}
+
+// Forward doctrine patterns every 5 minutes
+setInterval(() => forwardDoctrineToWhiteboard(), 300000);
+
 // ── Start ──
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`[BRIGHTON] Genesis Brighton Protocol listening on port ${PORT}`);
